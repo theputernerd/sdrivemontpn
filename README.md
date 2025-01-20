@@ -53,6 +53,7 @@ Configuration is stored in `/etc/sdrivemontpn/config.yaml`:
 
 ```yaml
 data_directory: "/var/log/sdrivemontpn/data"
+log_path: "/var/log/sdrivemontpn"
 log_file: "/var/log/sdrivemontpn/sdrivemontpn.log"
 attributes_to_monitor:
   - 1   # Raw_Read_Error_Rate
