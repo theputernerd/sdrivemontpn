@@ -1,4 +1,3 @@
-
 # **sdrivemontpn**
 SMART Drive monitor by the puter nerd
 `sdrivemontpn` is a Python-based SMART drive monitoring utility designed to track critical drive health metrics and provide insights into potential hardware issues. It supports logging, data analysis, and optional integration with Apache for easy web-based visualization.
@@ -21,7 +20,7 @@ SMART Drive monitor by the puter nerd
 1. Clone the repository:
    ```bash
    git clone <repository_url>
-   cd sdrivemon
+   cd sdrivemontpn
    ```
 
 2. Run the installation script:
@@ -54,7 +53,7 @@ Configuration is stored in `/etc/sdrivemontpn/config.yaml`:
 
 ```yaml
 data_directory: "/var/log/sdrivemontpn/data"
-log_file: "/var/log/sdrivemontpn.log"
+log_file: "/var/log/sdrivemontpn/sdrivemontpn.log"
 attributes_to_monitor:
   - 1   # Raw_Read_Error_Rate
   - 197 # Current Pending Sector Count
