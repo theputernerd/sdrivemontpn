@@ -9,6 +9,8 @@ import logging
 import argparse
 
 # Default configuration
+log_buffer = []  # Buffer to hold log messages before setup_logging
+logging_initialized = False  # Flag to track if logging is set up
 
 DEFAULT_CONFIG = {
     "check_frequency": "6h",
@@ -36,18 +38,36 @@ CONFIG_PATH = "/etc/sdrivemontpn/config.yaml"
 
 def setup_logging(log_file):
     """Setup logging configuration."""
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)  # Ensure the log file's directory exists
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    global log_buffer, logging_initialized
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s"
+        )
+        #logging.info("Logging initialized.")
+        logging_initialized = True
+
+        # Flush buffered messages
+        for msg in log_buffer:
+            logging.info(msg)
+        log_buffer.clear()
+
+    except Exception as e:
+        print(f"Error during logging setup: {e}")
+        raise
 
 def verbose_print(verbose, message):
     """Print and log messages when verbose mode is enabled."""
+    global log_buffer, logging_initialized
     if verbose:
         print(message)
-    logging.info(message)
+
+    if logging_initialized:
+        logging.info(message)
+    else:
+        log_buffer.append(message)
 
 def get_devices(verbose=False):
     devices = []
@@ -300,13 +320,14 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.verbose)
-    devices = get_devices(args.verbose)
     attributes = config["attributes_to_monitor"]
     data_dir = config["data_directory"]
     log_file = config["log_file"]
 
     # Setup logging
     setup_logging(log_file)
+
+    devices = get_devices(args.verbose)
 
     verbose_print(args.verbose, f"Starting SMART monitoring. Data directory: {data_dir}")
 

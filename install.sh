@@ -12,7 +12,7 @@ TIMER_PATH="/etc/systemd/system"  # Path for systemd service/timer
 OWNER="www-data"
 GROUP="www-data"
 APACHE_SETUP=true
-TIMER_INTERVAL="1h"  # Timer interval for systemd
+TIMER_INTERVAL="*:0/30"  # Timer interval for systemd
 CLEAN_INSTALL=false  # Flag for removing logs and data on reinstall
 
 # Determine the correct home directory for the invoking user
@@ -171,7 +171,7 @@ cat <<EOF > "$TIMER_PATH/$TIMER_NAME"
 Description=Timer for sdrivemontpn
 
 [Timer]
-OnUnitActiveSec=$TIMER_INTERVAL
+OnCalendar=$TIMER_INTERVAL
 Unit=$SERVICE_NAME
 
 [Install]
