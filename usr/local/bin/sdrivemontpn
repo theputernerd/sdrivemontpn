@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+import os
+import yaml
+import subprocess
+from datetime import datetime
+import matplotlib.pyplot as plt
+import pandas as pd
+import logging
+import argparse
+
+# Default configuration
+
+DEFAULT_CONFIG = {
+    "check_frequency": "6h",
+    "data_directory": "/var/log/sdrivemontpn/data",
+    "log_file": "/var/log/sdrivemontpn/sdrivemontpn.log",
+    "attributes_to_monitor": [
+        1,   # Raw_Read_Error_Rate
+        197, # Current Pending Sector Count
+        5,   # Reallocated Sectors Count
+        187, # Reported Uncorrectable Errors
+        10,  # Spin_Retry_Count
+        196, # Reallocated_Event_Count
+        198, # Offline_Uncorrectable
+        9,   # Power_On_Hours
+        193, # Load_Cycle_Count
+        194, # Temperature
+        3,   # Spin_Up_Time
+        4,   # Start_Stop_Count
+        12,  # Power_Cycle_Count
+        199  # UDMA_CRC_Error_Count
+    ]
+}
+
+CONFIG_PATH = "/etc/sdrivemontpn/config.yaml"
+
+def setup_logging(log_file):
+    """Setup logging configuration."""
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)  # Ensure the log file's directory exists
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+def verbose_print(verbose, message):
+    """Print and log messages when verbose mode is enabled."""
+    if verbose:
+        print(message)
+    logging.info(message)
+
+def get_devices(verbose=False):
+    devices = []
+    try:
+        output = subprocess.check_output(["lsblk", "-dno", "NAME,TYPE"], text=True).strip()
+        for line in output.splitlines():
+            name, dev_type = line.split()
+            if dev_type == "disk" and not name.startswith("loop"):
+                device = f"/dev/{name}"
+                identifier = get_device_identifier(device, verbose)
+                if identifier:
+                    devices.append((device, identifier))
+    except Exception as e:
+        verbose_print(verbose, f"Error retrieving devices: {e}")
+    return devices
+
+def get_device_identifier(drive, verbose=False):
+    try:
+        result = subprocess.run(["smartctl", "-i", drive], capture_output=True, text=True, check=True)
+        output = result.stdout.splitlines()
+        model = None
+        serial = None
+        for line in output:
+            if "Device Model" in line:
+                model = line.split(":")[1].strip().replace(" ", "_")
+            elif "Serial Number" in line:
+                serial = line.split(":")[1].strip()
+        if model and serial:
+            verbose_print(verbose, f"Identifier for {drive}: {model}_{serial}")
+            return f"{model}_{serial}"
+    except subprocess.CalledProcessError:
+        verbose_print(verbose, f"Skipping {drive}: SMART not supported or other error.")
+        return None
+
+def load_config(verbose=False):
+    if not os.path.exists(CONFIG_PATH):
+        verbose_print(verbose, "Config file not found. Using default configuration.")
+        return DEFAULT_CONFIG
+
+    try:
+        with open(CONFIG_PATH, "r") as file:
+            config = yaml.safe_load(file) or {}
+            verbose_print(verbose, f"Loaded config: {config}")
+    except yaml.YAMLError as e:
+        verbose_print(verbose, f"Error parsing config file: {e}")
+        return DEFAULT_CONFIG
+
+    return {**DEFAULT_CONFIG, **config}
+
+
+def run_smartctl(drive, verbose=False):
+    try:
+        result = subprocess.run(["smartctl", "-A", drive], capture_output=True, text=True, check=True)
+        return result.stdout
+    except subprocess.CalledProcessError:
+        verbose_print(verbose, f"Skipping {drive}: SMART not supported or other error.")
+        return None
+
+def parse_smart_output(output, attributes, verbose=False):
+    lines = output.splitlines()
+    data = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 10:
+            continue
+        try:
+            attr_id = int(parts[0])
+            if attr_id in attributes:
+                data[attr_id] = parts[9]
+        except ValueError:
+            continue
+    verbose_print(verbose, f"Parsed SMART data: {data}")
+    return data
+
+def write_to_csv_and_plot(log_dir, drive, data, device_identifier, verbose=False):
+    drive_dir = os.path.join(log_dir, device_identifier)
+    os.makedirs(drive_dir, exist_ok=True)
+    csv_path = os.path.join(drive_dir, f"{device_identifier}.csv")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    file_exists = os.path.isfile(csv_path)
+    with open(csv_path, "a") as file:
+        if not file_exists:
+            headers = ["Timestamp"] + [str(attr) for attr in data.keys()]
+            file.write(",".join(headers) + "\n")
+
+        row = [timestamp] + [data.get(attr, "N/A") for attr in data.keys()]
+        file.write(",".join(row) + "\n")
+
+    verbose_print(verbose, f"Data written to {csv_path}")
+
+    # Generate plots
+    for attr_id, value in data.items():
+        generate_plot(drive_dir, csv_path, attr_id)
+    generate_plot(drive_dir, csv_path, "combined")
+    generate_plot(drive_dir, csv_path, "normalized_combined_with_variance")
+def generate_plot(output_dir, csv_path, attr_id, max_points=2000):
+    SMART_ATTRIBUTE_NAMES = {
+        1: "Raw_Read_Error_Rate",
+        3: "Spin_Up_Time",
+        4: "Start_Stop_Count",
+        5: "Reallocated_Sector_Ct",
+        9: "Power_On_Hours",
+        10: "Spin_Retry_Count",
+        12: "Power_Cycle_Count",
+        193: "Load_Cycle_Count",
+        194: "Temperature_Celsius",
+        196: "Reallocated_Event_Count",
+        197: "Current_Pending_Sector",
+        198: "Offline_Uncorrectable",
+        199: "UDMA_CRC_Error_Count",
+    }
+
+    try:
+        data_df = pd.read_csv(csv_path)
+
+        # Convert Timestamp to datetime
+        data_df["Timestamp"] = pd.to_datetime(data_df["Timestamp"])
+
+        # Limit to the last `max_points` rows for calculations and plotting
+        if len(data_df) > max_points:
+            data_df = data_df.iloc[-max_points:]
+
+        if attr_id == "normalized_combined_with_variance":
+            plt.figure(figsize=(12, 6))
+
+            for column in data_df.columns[1:]:
+                friendly_name = SMART_ATTRIBUTE_NAMES.get(
+                    int(column), f"Unknown_{column}"
+                )
+
+                # Normalize data
+                normalized_data = (data_df[column] - data_df[column].mean()) / data_df[column].std()
+
+                # Calculate rolling mean and variance
+                rolling_mean = normalized_data.expanding().mean()
+                rolling_std = normalized_data.expanding().std()
+
+                plt.plot(
+                    data_df["Timestamp"],
+                    rolling_mean,
+                    marker="o",
+                    label=f"{column}_{friendly_name}",
+                )
+                plt.fill_between(
+                    data_df["Timestamp"],
+                    rolling_mean - rolling_std,
+                    rolling_mean + rolling_std,
+                    alpha=0.2,
+                    label=f"{column} ±1σ",
+                )
+
+            plt.title(f"Normalized Combined SMART Attributes with Variance for {os.path.basename(csv_path)}")
+            plt.xlabel("Timestamp")
+            plt.ylabel("Normalized Values")
+            plt.xticks(rotation=45)
+            plt.legend(loc="best")
+            plt.grid(visible=True, linestyle="--", alpha=0.5)
+            plt.tight_layout()
+
+            normalized_combined_plot_path = os.path.join(output_dir, "normalized_combined_with_variance.png")
+            plt.savefig(normalized_combined_plot_path)
+            plt.close()
+
+        elif attr_id == "combined":
+            plt.figure(figsize=(12, 6))
+
+            for column in data_df.columns[1:]:
+                friendly_name = SMART_ATTRIBUTE_NAMES.get(
+                    int(column), f"Unknown_{column}"
+                )
+
+                # Calculate rolling mean and variance
+                rolling_mean = data_df[column].expanding().mean()
+                rolling_std = data_df[column].expanding().std()
+
+                plt.plot(
+                    data_df["Timestamp"],
+                    rolling_mean,
+                    marker="o",
+                    label=f"{column}_{friendly_name}",
+                )
+                plt.fill_between(
+                    data_df["Timestamp"],
+                    rolling_mean - rolling_std,
+                    rolling_mean + rolling_std,
+                    alpha=0.2,
+                    label=f"{column} ±1σ",
+                )
+
+            plt.title(f"Combined SMART Attributes with Variance for {os.path.basename(csv_path)}")
+            plt.xlabel("Timestamp")
+            plt.ylabel("Raw Values")
+            plt.xticks(rotation=45)
+            plt.legend(loc="best")
+            plt.grid(visible=True, linestyle="--", alpha=0.5)
+            plt.tight_layout()
+
+            combined_plot_path = os.path.join(output_dir, "combined_with_variance.png")
+            plt.savefig(combined_plot_path)
+            plt.close()
+
+        else:
+            attr_data = data_df[["Timestamp", str(attr_id)]].dropna()
+            friendly_name = SMART_ATTRIBUTE_NAMES.get(
+                int(attr_id), f"Unknown_{attr_id}"
+            )
+
+            # Calculate rolling mean and variance
+            rolling_mean = attr_data[str(attr_id)].expanding().mean()
+            rolling_std = attr_data[str(attr_id)].expanding().std()
+
+            plt.figure(figsize=(10, 5))
+            plt.plot(
+                attr_data["Timestamp"],
+                rolling_mean,
+                marker="o",
+                label=f"{attr_id}_{friendly_name}",
+            )
+            plt.fill_between(
+                attr_data["Timestamp"],
+                rolling_mean - rolling_std,
+                rolling_mean + rolling_std,
+                alpha=0.2,
+                label=f"{attr_id} ±1σ",
+            )
+
+            plt.title(f"SMART Attribute: {friendly_name} with Cumulative Variance for {os.path.basename(csv_path)}")
+            plt.xlabel("Timestamp")
+            plt.ylabel("Raw Value")
+            plt.xticks(rotation=45)
+            plt.legend()
+            plt.grid(visible=True, linestyle="--", alpha=0.5)
+            plt.tight_layout()
+
+            plot_path = os.path.join(output_dir, f"{attr_id}_{friendly_name}_with_variance.png")
+            plt.savefig(plot_path)
+            plt.close()
+
+    except Exception as e:
+        print(f"Error generating plot for attribute {attr_id}: {e}")
+
+
+
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SMART Drive Monitoring Script")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    args = parser.parse_args()
+
+    config = load_config(args.verbose)
+    devices = get_devices(args.verbose)
+    attributes = config["attributes_to_monitor"]
+    data_dir = config["data_directory"]
+    log_file = config["log_file"]
+
+    # Setup logging
+    setup_logging(log_file)
+
+    verbose_print(args.verbose, f"Starting SMART monitoring. Data directory: {data_dir}")
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    for device, device_identifier in devices:
+        try:
+            smart_data = run_smartctl(device, args.verbose)
+            if smart_data:
+                parsed_data = parse_smart_output(smart_data, attributes, args.verbose)
+                write_to_csv_and_plot(data_dir, device, parsed_data, device_identifier, args.verbose)
+        except Exception as e:
+            verbose_print(args.verbose, f"Error processing {device}: {e}")
+
+
+
+if __name__ == "__main__":
+    main()
+

@@ -1,0 +1,18 @@
+data_directory: "/var/log/sdrivemontpn/data"
+log_path: "/var/log/sdrivemontpn"
+log_file: "/var/log/sdrivemontpn/sdrivemontpn.log"
+attributes_to_monitor: # SMART attributes to track
+  - 1   # Raw_Read_Error_Rate (Critical: Immediate failure risk if marked failing)
+  - 197 # Current Pending Sector Count (Critical: Indicates unresolved sector issues)
+  - 5   # Reallocated Sectors Count (Critical: Tracks permanent sector failures)
+  - 187 # Reported Uncorrectable Errors (Critical: Indicates uncorrectable read/write errors)
+  - 10  # Spin_Retry_Count (Critical: Mechanical issues with spinning the drive)
+  - 196 # Reallocated_Event_Count (Important: Logs attempts to reallocate bad sectors)
+  - 198 # Offline_Uncorrectable (Important: Tracks bad sectors found during offline tests)
+  - 9   # Power_On_Hours (Aging indicator: High value implies wear and tear)
+  - 193 # Load_Cycle_Count (Aging indicator: Excessive load cycles can wear the drive)
+  - 194 # Temperature (Aging indicator: High temperatures accelerate failure rates)
+  - 3   # Spin_Up_Time (Performance indicator: Gradual increase signals mechanical issues)
+  - 4   # Start_Stop_Count (Wear indicator: Excessive start/stop cycles indicate usage strain)
+  - 12  # Power_Cycle_Count (General usage indicator: Abrupt increases may signal power issues)
+  - 199 # UDMA_CRC_Error_Count (Environmental indicator: Often points to cable or controller issues)
